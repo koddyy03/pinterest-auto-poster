@@ -1,0 +1,60 @@
+name: Daily Pinterest Pin
+
+on:
+  schedule:
+    # Run every day at 15:00 UTC (midnight JST / 8am PT)
+    - cron: '0 15 * * *'
+  workflow_dispatch:
+    inputs:
+      pin_index:
+        description: 'Pin index to post (0-11). Leave empty for auto.'
+        required: false
+
+jobs:
+  post-pin:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Read current index
+        id: read-index
+        run: |
+          if [ -f pin_index.txt ]; then
+            INDEX=$(cat pin_index.txt)
+          else
+            INDEX=0
+          fi
+          # Allow manual override
+          if [ -n "${{ github.event.inputs.pin_index }}" ]; then
+            INDEX=${{ github.event.inputs.pin_index }}
+          fi
+          echo "index=$INDEX" >> $GITHUB_OUTPUT
+
+      - name: Post Pinterest pin
+        id: post-pin
+        env:
+          PINTEREST_ACCESS_TOKEN: ${{ secrets.PINTEREST_ACCESS_TOKEN }}
+          PIN_INDEX: ${{ steps.read-index.outputs.index }}
+        run: python post_pin.py
+
+      - name: Update index tracker
+        run: |
+          echo "${{ steps.post-pin.outputs.next_index }}" > pin_index.txt
+
+      - name: Commit updated index
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pin_index.txt
+          git diff --cached --quiet || git commit -m "Update pin index to ${{ steps.post-pin.outputs.next_index }}"
+          git push
